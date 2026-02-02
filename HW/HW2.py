@@ -123,12 +123,12 @@ if openai_api_key:
             }
         ]
 
-        # Generate an answer using the OpenAI API.
-        stream = client.chat.completions.create(
+    # Generate an answer using the OpenAI API.
+    stream = client.chat.completions.create(
             model=model_name,
             messages=messages,
             stream=True,
         )
 
         # Stream the response to the app using `st.write_stream`.
-        st.write_stream(stream)
+    st.write_stream(stream)
