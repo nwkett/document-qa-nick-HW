@@ -40,11 +40,11 @@ def google_gen(model_type, question_to_ask):
 
     # Select model based on type
     if "pro" in model_type:
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        model = genai.GenerativeModel("gemini-3-pro-preview")
     elif "lite" in model_type:
-        model = genai.GenerativeModel("gemini-1.5-flash-lite")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
     else:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
 
     # Gemini expects a single prompt
     response = model.generate_content(question_to_ask)
