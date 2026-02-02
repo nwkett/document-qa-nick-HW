@@ -46,8 +46,9 @@ def google_gen(model_type, question_to_ask):
     else:
         model = genai.GenerativeModel("gemini-3-flash-preview")
 
+
     # Gemini expects a single prompt
-    response = model.generate_content(question_to_ask)
+    response = model.generate_content(f"URL content:\n\n{page_text}\n\n---\n\n{effective_question_language}")
 
     return response.text
 
