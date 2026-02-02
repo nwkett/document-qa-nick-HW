@@ -116,7 +116,7 @@ if openai_api_key:
         effective_question = question
 
 
-        messages = [
+    messages = [
             {
                 "role": "user",
                 "content": f"Here's a document: {document_text} \n\n---\n\n {effective_question}",
