@@ -84,7 +84,7 @@ url = st.text_input("Enter a webpage URL:", placeholder="https://example.com")
 
 
 openai_api_key = st.secrets.get("OPENAI_API_KEY")
-gemini_api_key = st.secrets.get("gemini_API_KEY")
+gemini_api_key = st.secrets.get("GEMINI_API_KEY")
 
 if llm_choice == "OpenAI":
     if not openai_api_key:
