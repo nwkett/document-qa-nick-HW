@@ -30,7 +30,7 @@ def read_url_content(url):
 
 def google_gen(model_type, question_to_ask):
     # Get API key
-    api_key = st.secrets.get("google_apikey")
+    api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key:
         st.error("Missing google_apikey in Streamlit secrets.")
         st.stop()
