@@ -1,3 +1,5 @@
 streamlit
 openai
 pymupdf
+bs4
+google.generativeai
