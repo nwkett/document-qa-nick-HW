@@ -7,6 +7,7 @@ pg = st.navigation(
     [
         st.Page("HW/HW1.py", title="HW 1", icon="1️⃣"),
         st.Page("HW/HW2.py", title="HW 2", icon="2️⃣", default=True),
+        st.Page("HW/HW2.py", title="HW 2", icon="2️⃣")
     ]
 )
 
