@@ -142,7 +142,7 @@ if 'HW4_VectorDB' not in st.session_state:
         collection = chroma_client.get_or_create_collection('HW4Collection')
     
 
-        load_htmls_to_collection('./HW4-Data/', collection)
+        load_htmls_to_collection('./HW4-Data/su_orgs', collection)
         
         st.session_state.HW4_VectorDB = collection
 
