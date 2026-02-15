@@ -149,7 +149,7 @@ if 'HW4_VectorDB' not in st.session_state:
 
 def apply_buffer():
     MAX_HISTORY = 10
-    "Changed the max history to 10 so the last 5 interactions are involved"  
+    """Changed the max history to 10 so the last 5 interactions are involved"""  
 
     msgs = st.session_state.messages
     system_msg = msgs[:1]
