@@ -162,7 +162,7 @@ def apply_buffer():
 
 
 
-st.title('Nicks Lab 4')
+st.title('Nicks HW 4')
 
 # Sidebar
 openAI_model = st.sidebar.selectbox("Select Model", ('mini', 'regular'))
@@ -187,7 +187,7 @@ When answering questions:
 if 'messages' not in st.session_state:
     st.session_state.messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "assistant", "content": "Hi! I'm your course information assistant. Ask me anything about the Syracuse iSchool courses!"}
+        {"role": "assistant", "content": "Hi! I'm your org information assistant. Ask me anything about the Syracuse's organizations!"}
     ]
 
 for msg in st.session_state.messages:
