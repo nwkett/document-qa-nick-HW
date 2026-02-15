@@ -196,13 +196,13 @@ for msg in st.session_state.messages:
     chat_msg = st.chat_message(msg["role"])
     chat_msg.write(msg["content"])
 
-if prompt := st.chat_input("Ask about course topics..."):
+if prompt := st.chat_input("Ask about org topics..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
     
     client = st.session_state.openai_client
-    collection = st.session_state.Lab4_VectorDB
+    collection = st.session_state.HW4_VectorDB
     
     response = client.embeddings.create(
         input=prompt,
