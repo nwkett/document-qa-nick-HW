@@ -1,193 +1,254 @@
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
 from openai import OpenAI, AuthenticationError
-import google.generativeai as genai
+import sys
+import chromadb
+from pathlib import Path
+from PyPDF2 import PdfReader
+from bs4 import BeautifulSoup
+
+__import__('pysqlite3')
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 
-st.title('Nicks Lab3 Question answering chatbot')
-
-def read_url_content(url):
+def extract_text_from_html(html_path):
+    "Extract text from a HTML file"
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-        return soup.get_text(separator=" ", strip=True)
-    except requests.RequestException as e:
-        st.error(f"Error reading {url}: {e}")
+        with open(html_path, 'r', encoding='utf-8') as file:
+            soup = BeautifulSoup(file, 'html.parser')
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+            text = soup.get_text()
+            # Clean up text
+            text = " ".join(text.split())
+            return text
+    except Exception as e:
+        st.error(f"Error reading {html_path}: {str(e)}")
         return None
 
+def add_to_collection(collection, text, file_name):
+    try:
+
+        client = st.session_state.openai_client
+        
+
+        response = client.embeddings.create(
+            input=text,
+            model='text-embedding-3-small'
+        )
+        
+
+        embedding = response.data[0].embedding
+        
+        collection.add(
+            documents=[text],
+            ids=[file_name],
+            embeddings=[embedding]
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error adding {file_name} to collection: {str(e)}")
+        return False
+
+
+def load_htmls_to_collection(folder_path, collection):
+    """Load all htmls from folder into the collection"""
+    # Check if collection is empty and load PDFs
+    if collection.count() == 0:
+        html_files = list(Path(folder_path).glob("*.html"))
+        
+        if not html_files:
+            st.warning(f"No HTML files found in {folder_path}")
+            return False
+        
+        all_chunks = []
+        for html_path in html_files:
+            # Extract text from HTML
+            text = extract_text_from_html(html_path)
+            
+            if text:
+                # Add to collection
+                chunks= chunk_text(text, html_path.name, num_chunks = 4)
+                all_chunks.extend(chunks)
+        
+        if all_chunks:
+            fixed_size_chunks_to_collection(collection, all_chunks)
+            st.success(f"✅ Successfully loaded {len(html_files)} HTML files ({len(all_chunks)} chunks) into ChromaDB")
+        
+            return True
+        else:
+            st.info(f"Collection already contains {collection.count()} documents")
+            return True
+        
+def chunk_text(text, file_name, num_chunks=2):
+    """I used fixed-size chunking for this assignment because the directions
+    asked for 2 mini documents for each. So splitting them into 2 chunks will be easiest since
+    the documents are simple and only a few sections long. Additionally, this is a simple
+    chunking method.
+
+    The tradeoff is that it may split the document in the middle of a sentence or section
+    but since the document is about student orgs, theyre smaller and structured the same way across the board.
+    """
+
+
+    chunk_size = len(text) // num_chunks
+    chunks = []
+    
+    for i in range(num_chunks):
+        start = i * chunk_size
+        end = start + chunk_size if i < num_chunks - 1 else len(text)
+        chunk = text[start:end].strip()
+        
+        if chunk:  
+            chunks.append({
+                'text': chunk,
+                'id': f"{file_name}_chunk_{i+1}"
+            })
+    
+    return chunks
+
+def fixed_size_chunks_to_collection(collection, chunks):
+    "Add chunks to collection"
+
+    try:
+        client = st.session_state.openai_client
+
+        texts = [chunk['text'] for chunk in chunks]
+        ids = [chunk['id'] for chunk in chunks]
+
+        response = client.embeddings.create(
+            input = texts,
+            model = 'text-embedding-3-small'
+        )
+
+        embeddings = [item.embedding for item in response.data]
+
+        collection.add(
+            documents=texts,
+            ids=ids,
+            embeddings=embeddings
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error adding chunks to collection:  {str(e)}")
+        return False
+
+
+if 'openai_client' not in st.session_state:
+    st.session_state.openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+if 'HW4_VectorDB' not in st.session_state:
+    with st.spinner("Initializing ChromaDB and loading PDFs..."):
+        chroma_client = chromadb.PersistentClient(path='./ChromaDB_for_Lab')
+        collection = chroma_client.get_or_create_collection('HW4Collection')
+    
+
+        load_htmls_to_collection('./HW4-Data/', collection)
+        
+        st.session_state.Lab4_VectorDB = collection
+
+
 def apply_buffer():
-    MAX_HISTORY = 6  
+    MAX_HISTORY = 10
+    "Changed the max history to 10 so the last 5 interactions are involved"  
+
     msgs = st.session_state.messages
-    system_msg = msgs[:1]   
-    rest = msgs[1:]         
+    system_msg = msgs[:1]
+    rest = msgs[1:]    
 
     if len(rest) > MAX_HISTORY:
         rest = rest[-MAX_HISTORY:]
 
     st.session_state.messages = system_msg + rest
 
-def build_system_prompt_with_urls(url_text: str) -> str:
-    if url_text and url_text.strip():
-        return BASE_SYSTEM_PROMPT + "\n\nURL CONTEXT (from the user's URLs):\n" + url_text.strip()
-    return BASE_SYSTEM_PROMPT
 
 
-def call_openai(messages):
-    if "client" not in st.session_state:
-        st.session_state.client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+st.title('Nicks Lab 4')
 
-    client = st.session_state.client
-    stream = client.chat.completions.create(
-        model=model_to_use,
-        messages=messages,
-        stream=True
-    )
-    return stream
+# Sidebar
+openAI_model = st.sidebar.selectbox("Select Model", ('mini', 'regular'))
 
-def call_gemini(messages):
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel(model_to_use)
-
-    system_text = messages[0]["content"]
-    convo_lines = [f"SYSTEM: {system_text}"]
-
-    for m in messages[1:]:
-        role = m["role"].upper()
-        convo_lines.append(f"{role}: {m['content']}")
-
-    prompt_text = "\n".join(convo_lines)
-
-    return model.generate_content(prompt_text, stream=True)
-
-BASE_SYSTEM_PROMPT = """
-You are a helpful chatbot.
-
-Rules:
-1) Explain everything so a 10-year-old can understand. Use simple words and short sentences.
-2) After you answer a question, ALWAYS ask: "Do you want more info?"
-3) If the user says "Yes", provide more information about the SAME topic, then ask again: "Do you want more info?"
-4) If the user says "No", say: "Okay! What can I help you with?" and wait for a new question.
-
-If URL context is provided, use it as your main source of truth.
-If the URL context does not contain the answer, say you could not find it in the URLs.
-""".strip()
-
-st.sidebar.header("Options")
-
-# URLs
-st.sidebar.subheader("Input up to two URLs")
-url1 = st.sidebar.text_input("URL 1", placeholder="https://...")
-url2 = st.sidebar.text_input("URL 2", placeholder="https://...")
-load_urls = st.sidebar.button("Load URL(s)")
-
-st.sidebar.subheader("Pick an LLM")
-vendor = st.sidebar.selectbox("LLMs", ("OpenAI", "Gemini"))
-
-if vendor == "OpenAI":
-    model_to_use = st.sidebar.selectbox(
-        "OpenAI premium model",
-        ("gpt-5-chat-latest",)  
-    )
+if openAI_model == 'mini':
+    model_to_use = "gpt-4o-mini"
 else:
-    model_to_use = st.sidebar.selectbox(
-        "Gemini premium model",
-        ("gemini-3-pro-preview",)      
-    )
+    model_to_use = 'gpt-4o'
 
-if "url_text" not in st.session_state:
-    st.session_state.url_text = ""
 
-if "messages" not in st.session_state:
+
+# Lab 3 chat bot 
+
+SYSTEM_PROMPT = """
+are a helpful assistant for Syracuse University's student organizations.
+When answering questions:
+1. If you use information from the provided context, clearly state: "Based on the student organization information..."
+2. If answering from general knowledge, state: "I don't have specific information about this, but..."
+3. Be concise, simple and helpful
+"""
+
+if 'messages' not in st.session_state:
     st.session_state.messages = [
-        {"role": "system", "content": build_system_prompt_with_urls(st.session_state.url_text)},
-        {"role": "assistant", "content": "Hi! What can I help you with?"}
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "assistant", "content": "Hi! I'm your course information assistant. Ask me anything about the Syracuse iSchool courses!"}
     ]
-
-if "expecting_more_info" not in st.session_state:
-    st.session_state.expecting_more_info = False
-
-if "last_topic" not in st.session_state:
-    st.session_state.last_topic = ""
-
-
-if load_urls:
-    texts = []
-
-    if url1.strip():
-        t1 = read_url_content(url1.strip())
-        if t1:
-            texts.append(f"URL 1 ({url1.strip()}):\n{t1}")
-
-    if url2.strip():
-        t2 = read_url_content(url2.strip())
-        if t2:
-            texts.append(f"URL 2 ({url2.strip()}):\n{t2}")
-
-    st.session_state.url_text = "\n\n---\n\n".join(texts)
-
-    st.session_state.messages[0]["content"] = build_system_prompt_with_urls(st.session_state.url_text)
-
-    if st.session_state.url_text.strip():
-        st.sidebar.success("Loaded URL text and updated system context!")
-    else:
-        st.sidebar.warning("No URL text loaded (check your URLs).")
 
 for msg in st.session_state.messages:
     if msg["role"] == "system":
         continue
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+    chat_msg = st.chat_message(msg["role"])
+    chat_msg.write(msg["content"])
 
-
-YES_SET = {"yes", "y", "yeah", "yep", "sure", "ok", "okay"}
-NO_SET = {"no", "n", "nope", "nah"}
-
-if prompt := st.chat_input("Type here..."):
-    user_text = prompt.strip()
-    normalized = user_text.lower().strip()
-
-    if st.session_state.expecting_more_info and normalized in YES_SET:
-        user_text = (
-            f"Give more information about this topic: {st.session_state.last_topic}. "
-            "Explain for a 10-year-old. End with: Do you want more info?"
-        )
-
-    elif st.session_state.expecting_more_info and normalized in NO_SET:
-        st.session_state.expecting_more_info = False
-        st.session_state.last_topic = ""
-
-        assistant_text = "Okay! What can I help you with?"
-        st.session_state.messages.append({"role": "assistant", "content": assistant_text})
-
-        apply_buffer()
-
-        with st.chat_message("assistant"):
-            st.write(assistant_text)
-
-        st.stop()
-
-    else:
-        st.session_state.last_topic = user_text
-        st.session_state.expecting_more_info = True
-
-    st.session_state.messages.append({"role": "user", "content": user_text})
-
+if prompt := st.chat_input("Ask about course topics..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    client = st.session_state.openai_client
+    collection = st.session_state.Lab4_VectorDB
+    
+    response = client.embeddings.create(
+        input=prompt,
+        model='text-embedding-3-small'
+    )
+    query_embedding = response.data[0].embedding
+    
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=3  
+    )
+    
+    context = ""
+    if results['documents'] and len(results['documents'][0]) > 0:
+        context = "\n\n---\n\n".join(results['documents'][0])
+        sources = results['ids'][0]
+        
+        context_message = f"""
+        Use the following context from course materials to answer the question. If the answer is in this context, make sure to say "Based on the course materials..." 
+        
+        Context:
+        {context}
+        
+        Sources: {', '.join(sources)}
+        """
+        
+        st.session_state.messages.insert(-1, {"role": "system", "content": context_message})
+    
     apply_buffer()
-
+    
+    stream = client.chat.completions.create(
+        model=model_to_use,
+        messages=st.session_state.messages,
+        stream=True
+    )
+    
     with st.chat_message("assistant"):
-        if vendor == "OpenAI":
-            stream = call_openai(st.session_state.messages)
-            response = st.write_stream(stream)
-        else:
-            gstream = call_gemini(st.session_state.messages)
-            chunks = []
-            for chunk in gstream:
-                if hasattr(chunk, "text") and chunk.text:
-                    chunks.append(chunk.text)
-                    st.write(chunk.text)
-            response = "".join(chunks).strip()
-
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        response_text = st.write_stream(stream)
+    
+    st.session_state.messages.append({"role": "assistant", "content": response_text})
+    
+  
+    st.session_state.messages = [
+        msg for msg in st.session_state.messages 
+        if not (msg["role"] == "system" and "Context:" in msg["content"])
+    ]
+    
     apply_buffer()
