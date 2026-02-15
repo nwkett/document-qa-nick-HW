@@ -6,5 +6,4 @@ google.generativeai
 chromadb
 PyPDF2
 pysqlite3-binary
-protobuf==3.20
 beautifulsoup4
