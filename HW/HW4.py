@@ -3,7 +3,6 @@ from openai import OpenAI, AuthenticationError
 import sys
 import chromadb
 from pathlib import Path
-from PyPDF2 import PdfReader
 from bs4 import BeautifulSoup
 
 __import__('pysqlite3')
@@ -138,14 +137,14 @@ if 'openai_client' not in st.session_state:
     st.session_state.openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 if 'HW4_VectorDB' not in st.session_state:
-    with st.spinner("Initializing ChromaDB and loading PDFs..."):
-        chroma_client = chromadb.PersistentClient(path='./ChromaDB_for_Lab')
+    with st.spinner("Initializing ChromaDB and loading HTMLS.."):
+        chroma_client = chromadb.PersistentClient(path='./ChromaDB_for_HW')
         collection = chroma_client.get_or_create_collection('HW4Collection')
     
 
         load_htmls_to_collection('./HW4-Data/', collection)
         
-        st.session_state.Lab4_VectorDB = collection
+        st.session_state.HW4_VectorDB = collection
 
 
 def apply_buffer():
