@@ -180,7 +180,7 @@ are a helpful assistant for Syracuse University's student organizations.
 When answering questions:
 1. If you use information from the provided context, clearly state: "Based on the student organization information..."
 2. If answering from general knowledge, state: "I don't have specific information about this, but..."
-3. Be concise, simple and helpful
+3. Be concise and helpful
 """
 
 if 'messages' not in st.session_state:
