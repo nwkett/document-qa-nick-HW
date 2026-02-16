@@ -107,7 +107,7 @@ def chunk_text(text, file_name, num_chunks=2):
     return chunks
 
 def fixed_size_chunks_to_collection(collection, chunks):
-    "Add chunks to collection"
+    """Add chunks to collection"""
 
     try:
         client = st.session_state.openai_client
@@ -148,8 +148,8 @@ if 'HW4_VectorDB' not in st.session_state:
 
 
 def apply_buffer():
-    MAX_HISTORY = 10
     """Changed the max history to 10 so the last 5 interactions are involved"""  
+    MAX_HISTORY = 10
 
     msgs = st.session_state.messages
     system_msg = msgs[:1]
@@ -221,7 +221,7 @@ if prompt := st.chat_input("Ask about org topics..."):
         sources = results['ids'][0]
         
         context_message = f"""
-        Use the following context from course materials to answer the question. If the answer is in this context, make sure to say "Based on the course materials..." 
+        Use the following context from student org materials to answer the question. If the answer is in this context, make sure to say "Based on the student organization info..." 
         
         Context:
         {context}
