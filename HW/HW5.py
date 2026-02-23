@@ -208,7 +208,7 @@ if prompt := st.chat_input("Ask about course topics..."):
 
     if message.tool_calls:
         tool_call = message.tool_calls[0]
-        query_arg = eval(tool_call.function.arguments["query"])
+        query_arg = eval(tool_call.function.arguments)["query"]
 
         result = relevant_course_info(query_arg)
 
