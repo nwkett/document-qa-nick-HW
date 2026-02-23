@@ -214,7 +214,11 @@ if prompt := st.chat_input("Ask about course topics..."):
 
         result = relevant_course_info(query_arg)
 
-        st.session_state.messages.append(message)
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": message.content,
+            "tool_calls": message.tool_calls
+        })
         st.session_state.messages.append({
             "role": "tool",
             "tool_call_id": tool_call.id,
