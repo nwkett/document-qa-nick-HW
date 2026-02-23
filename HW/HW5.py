@@ -8,7 +8,7 @@ from PyPDF2 import PdfReader
 __import__('pysqlite3')
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-
+#PDF Functions
 def extract_text_from_pdf(pdf_path):
     """Extract text from a PDF file"""
     try:
@@ -72,24 +72,67 @@ def load_pdfs_to_collection(folder_path, collection):
     else:
         st.info(f"Collection already contains {collection.count()} documents")
         return True
+    
 
-
-
-
+# Initialize AI Client
 if 'openai_client' not in st.session_state:
     st.session_state.openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-if 'Lab4_VectorDB' not in st.session_state:
-    with st.spinner("Initializing ChromaDB and loading PDFs..."):
-        chroma_client = chromadb.PersistentClient(path='./ChromaDB_for_Lab')
-        collection = chroma_client.get_or_create_collection('Lab4Collection')
+if 'HW5_VectorDB' not in st.session_state:
+    chroma_client = chromadb.PersistentClient(path='./ChromaDB_for_Lab')
+    collection = chroma_client.get_or_create_collection('HW5Collection')
+    load_pdfs_to_collection('./HW-05-Data/', collection)
+    st.session_state.HW5_VectorDB = collection
+
+# Step 3 Vector Search
+def relevant_course_info(query):
+    client = st.session_state.openai_client
+    collection = st.session_state.HW5_VectorDB
+
+    response = client.embeddings.create(
+        input=query,
+        model='text-embedding-3-small'
+    )
+    query_embedding = response.data[0].embedding
+
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=3
+    )
+
+    if results['documents'] and len(results['documents'][0]) > 0:
+        context = "\n\n---\n\n".join(results['documents'][0])
+        sources = ", ".join(results['ids'][0])
+        return f"Sources: {sources}\n\n{context}"
+    else:
+        return "No relevant course materials found."
+
+
     
 
-        load_pdfs_to_collection('./Lab-04-Data/', collection)
-        
-        st.session_state.Lab4_VectorDB = collection
+# Tool function for LLM about retrieving info from courses
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "relevant_course_info",
+            "description": "Retrieves relevant course material from the Syracuse iSchool course documents based on a query. Use this whenever the user asks about course content or course-related topics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to look up in the course materials"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
 
 
+# Short Term Memory Buffer
 def apply_buffer():
     MAX_HISTORY = 4  
 
@@ -103,16 +146,15 @@ def apply_buffer():
     st.session_state.messages = system_msg + rest
 
 
-
-st.title('Nicks Lab 4')
+st.title('Nicks HW5')
 
 # Sidebar
 openAI_model = st.sidebar.selectbox("Select Model", ('mini', 'regular'))
 
-if openAI_model == 'mini':
-    model_to_use = "gpt-4o-mini"
+if openAI_model == 'GPT4':
+    model_to_use = "gpt-4o"
 else:
-    model_to_use = 'gpt-4o'
+    model_to_use = 'gpt-4o-mini'
 
 
 
@@ -134,11 +176,18 @@ if 'messages' not in st.session_state:
         {"role": "assistant", "content": "Hi! I'm your course information assistant. Ask me anything about the Syracuse iSchool courses!"}
     ]
 
+# Chat History
+
 for msg in st.session_state.messages:
     if msg["role"] == "system":
         continue
+    if msg["role"] == "tool":
+        continue
     chat_msg = st.chat_message(msg["role"])
     chat_msg.write(msg["content"])
+
+
+# Chat Input
 
 if prompt := st.chat_input("Ask about course topics..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -146,52 +195,44 @@ if prompt := st.chat_input("Ask about course topics..."):
         st.markdown(prompt)
     
     client = st.session_state.openai_client
-    collection = st.session_state.Lab4_VectorDB
-    
-    response = client.embeddings.create(
-        input=prompt,
-        model='text-embedding-3-small'
-    )
-    query_embedding = response.data[0].embedding
-    
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=3  
-    )
-    
-    context = ""
-    if results['documents'] and len(results['documents'][0]) > 0:
-        context = "\n\n---\n\n".join(results['documents'][0])
-        sources = results['ids'][0]
-        
-        context_message = f"""
-        Use the following context from course materials to answer the question. If the answer is in this context, make sure to say "Based on the course materials..." 
-        
-        Context:
-        {context}
-        
-        Sources: {', '.join(sources)}
-        """
-        
-        st.session_state.messages.insert(-1, {"role": "system", "content": context_message})
-    
     apply_buffer()
     
-    stream = client.chat.completions.create(
+
+    response = client.chat.completions.create(
         model=model_to_use,
         messages=st.session_state.messages,
-        stream=True
+        tools=tools
     )
-    
-    with st.chat_message("assistant"):
-        response_text = st.write_stream(stream)
-    
+
+    message = response.choices[0].message
+
+    if message.tool_calls:
+        tool_call = message.tool_calls[0]
+        query_arg = tool_call.function.arguments["query"]
+
+        result = relevant_course_info(query_arg)
+
+        st.session_state.messages.append(message)
+        st.session_state.messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": result
+        })
+
+
+        final_response = client.chat.completions.create(
+                model=model_to_use,
+                messages=st.session_state.messages,
+                stream=True
+            )
+
+        with st.chat_message("assistant"):
+            response_text = st.write_stream(final_response)
+
+    else:
+        response_text = message.content
+        with st.chat_message("assistant"):
+            st.markdown(response_text)
+   
     st.session_state.messages.append({"role": "assistant", "content": response_text})
-    
-  
-    st.session_state.messages = [
-        msg for msg in st.session_state.messages 
-        if not (msg["role"] == "system" and "Context:" in msg["content"])
-    ]
-    
     apply_buffer()
