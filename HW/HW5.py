@@ -149,7 +149,7 @@ def apply_buffer():
 st.title('Nicks HW5')
 
 # Sidebar
-openAI_model = st.sidebar.selectbox("Select Model", ('mini', 'regular'))
+openAI_model = st.sidebar.selectbox("Select Model", ('GPT4', 'mini'))
 
 if openAI_model == 'GPT4':
     model_to_use = "gpt-4o"
