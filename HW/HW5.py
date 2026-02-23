@@ -183,6 +183,8 @@ for msg in st.session_state.messages:
         continue
     if msg["role"] == "tool":
         continue
+    if msg["role"] == "assistant" and not isinstance(msg.get("content"), str):
+        continue
     chat_msg = st.chat_message(msg["role"])
     chat_msg.write(msg["content"])
 
