@@ -15,8 +15,7 @@ def load_vector_db(_df):
         doc = str(row["Document"])
         title, description = doc.split("Description:", 1) if "Description:" in doc else (doc, "")
         collection.add(
-            documents=[f"{title.strip()}. {description.strip()}"],
-            metadatas=[{"title": title.strip(), "company": str(row["company_name"]), "date": str(row["Date"]), "url": str(row["URL"])}],
+            documents=[f"Company: {str(row['company_name'])}. Date: {str(row['Date'])}. {title.strip()}. {description.strip()}. URL: {str(row['URL'])}"],
             ids=[str(i)]
         )
     return collection
@@ -36,8 +35,8 @@ def build_prompt(question, collection):
     n = how_many(question)
     results = collection.query(query_texts=[question], n_results=n)
     context = ""
-    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-        context += f"Company: {meta['company']}\nTitle: {meta['title']}\nDate: {meta['date']}\nContent: {doc[:600]}\nURL: {meta['url']}\n\n"
+    for doc in results["documents"][0]:
+        context += f"{doc}\n\n"
 
     return f"""You are a bot that will be used by a large, global law firm to monitor news about its clients. Use ONLY the articles below to answer.
 
