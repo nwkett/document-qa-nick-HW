@@ -44,7 +44,7 @@ def build_prompt(question, collection):
 {context}
 Question: {question}
 
-If asked for interesting news, rank by interest and importance. Always cite the article"""
+If asked for interesting news, rank by interest and importance. Always cite the article. Always provide context for why each story was chosen"""
 
 # Main 
 st.title("HW 7 News Bot")
