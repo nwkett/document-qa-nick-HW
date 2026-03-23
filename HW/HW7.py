@@ -6,7 +6,7 @@ import anthropic
 
 @st.cache_data
 def load_articles():
-    return pd.read_csv("news.csv").fillna("")
+    return pd.read_csv("HW/news.csv").fillna("")
 
 @st.cache_resource
 def load_vector_db(_df):
