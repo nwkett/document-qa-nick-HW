@@ -22,7 +22,7 @@ def load_vector_db(_df):
     return collection
 
 def build_prompt(question, collection):
-    results = collection.query(query_texts=[question], n_results=5)
+    results = collection.query(query_texts=[question])
     context = ""
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
         context += f"Company: {meta['company']}\nTitle: {meta['title']}\nDate: {meta['date']}\nContent: {doc[:600]}\nURL: {meta['url']}\n\n"
