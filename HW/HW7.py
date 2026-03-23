@@ -21,8 +21,20 @@ def load_vector_db(_df):
         )
     return collection
 
+def how_many(question):
+    words = question.split()
+
+    for word in words:
+        if word.isdigit():
+            n = int(word)
+            if n > 50:
+                return 50
+            return n
+    return 5
+
 def build_prompt(question, collection):
-    results = collection.query(query_texts=[question])
+    n = how_many(question)
+    results = collection.query(query_texts=[question], n_results=n)
     context = ""
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
         context += f"Company: {meta['company']}\nTitle: {meta['title']}\nDate: {meta['date']}\nContent: {doc[:600]}\nURL: {meta['url']}\n\n"
