@@ -10,7 +10,7 @@ def load_articles():
 
 @st.cache_resource
 def load_vector_db(_df):
-    collection = chromadb.Client().create_collection("news")
+    collection = chromadb.Client().get_or_create_collection("news")
     for i, row in _df.iterrows():
         doc = str(row["Document"])
         title, description = doc.split("Description:", 1) if "Description:" in doc else (doc, "")
