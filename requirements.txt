@@ -8,10 +8,8 @@ chromadb
 PyPDF2
 pysqlite3-binary
 beautifulsoup4
-
-
-
 langchain
+langchain-core
 langchain-community
 langchain-openai
 langchain-anthropic
