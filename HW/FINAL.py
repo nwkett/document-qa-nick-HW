@@ -6,10 +6,9 @@ from dataclasses import dataclass
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.agents import create_agent
+from langchain_openai import ChatOpenAI
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-
  
 load_dotenv()
  
@@ -20,13 +19,12 @@ load_dotenv()
 @dataclass
 class Contact:
     company_name: str
-    primary_contact: str  # person's name, or "" if blank
+    primary_contact: str
     email: str
     description: str
  
     @property
     def greeting_name(self) -> str:
-        """Returns the contact name, or 'Team' if blank."""
         return self.primary_contact if self.primary_contact.strip() else "Team"
  
  
@@ -52,10 +50,9 @@ def parse_contacts(csv_text: str) -> list[Contact]:
  
  
 # ─────────────────────────────────────────────────
-# Agent tools
+# Tools
 # ─────────────────────────────────────────────────
  
-# DuckDuckGo — the agent uses this to research each company before drafting
 ddg_search = DuckDuckGoSearchRun(
     name="company_research",
     description=(
@@ -68,8 +65,7 @@ ddg_search = DuckDuckGoSearchRun(
     ),
 )
  
- 
-ALL_TOOLS = [ddg_search]
+TOOLS = [ddg_search]
  
  
 # ─────────────────────────────────────────────────
@@ -84,10 +80,10 @@ FRAMEWORK — PVC (Personalization, Value, Call-to-Action):
  
 1. PERSONALIZATION (opener): Write a specific, non-generic first line that \
 proves you actually know who they are. Use the company_research tool to find \
-a trigger event, recent news, mutual connection, Instagram post, website \
-content, or blog post. NEVER use a generic opener like "I came across your \
-company" or "I love what you do." If the search returns nothing useful, \
-reference something concrete from their company description instead.
+a trigger event, recent news, Instagram post, website content, or blog post. \
+NEVER use a generic opener like "I came across your company" or "I love what \
+you do." If the search returns nothing useful, reference something concrete \
+from their company description instead.
  
 2. VALUE (one sentence): "Summit Standard supports event planners with \
 high-quality products and expert-level operational excellence."
@@ -96,8 +92,8 @@ high-quality products and expert-level operational excellence."
 next week?"
  
 RULES:
-- Greet with "Hi {{greeting_name}}," — if there is no contact name, use \
-"Hi Team," or "Dear [Company] Team,".
+- Greet with "Hi {greeting_name}," — if greeting name is "Team", use \
+"Dear [Company] Team,".
 - UNDER 100 WORDS in the body. Hard limit. Be crisp.
 - Do NOT list packages or pricing. This is a first touch, not a catalog.
 - Sign off: [Your Name], Summit Standard
@@ -127,7 +123,7 @@ experiences with premium rentals and hands-on support."
 3. CALL-TO-ACTION: "Would a 15-minute call this week or next work for you?"
  
 RULES:
-- Greet with "Hi {{greeting_name}},"
+- Greet with "Hi {greeting_name},"
 - UNDER 75 WORDS. This is a nudge, not a re-pitch.
 - Confident, not apologetic. Never write "just checking in", "sorry to \
 bother", "bumping this", or "circling back".
@@ -145,12 +141,11 @@ Subject: <subject line>
 # LLM + Agent
 # ─────────────────────────────────────────────────
  
-def get_llm():
+def get_model():
     provider = st.session_state.get("provider", "OpenAI")
     api_key = st.session_state.get("api_key", "")
  
     if provider == "OpenAI":
-        from langchain_openai import ChatOpenAI
         return ChatOpenAI(
             model=st.session_state.get("model", "gpt-4o-mini"),
             temperature=0.6,
@@ -165,28 +160,17 @@ def get_llm():
         )
  
  
-def build_agent(system_prompt: str) -> AgentExecutor:
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ])
-    llm = get_llm()
-    agent = create_tool_calling_agent(llm, ALL_TOOLS, prompt)
-    return AgentExecutor(
-        agent=agent,
-        tools=ALL_TOOLS,
-        verbose=False,
-        max_iterations=6,
-        handle_parsing_errors=True,
+def draft_email(contact: Contact, mode: str) -> str:
+    system_prompt = FOLLOWUP_PROMPT if mode == "Follow-Up" else OUTREACH_PROMPT
+    model = get_model()
+ 
+    agent = create_agent(
+        model,
+        tools=TOOLS,
+        system_prompt=system_prompt,
     )
  
- 
-def draft_email(contact: Contact, mode: str) -> str:
-    sys_prompt = FOLLOWUP_PROMPT if mode == "Follow-Up" else OUTREACH_PROMPT
- 
-    executor = build_agent(sys_prompt)
-    human_input = (
+    user_message = (
         f"Draft an email for this contact.\n\n"
         f"Company name: {contact.company_name}\n"
         f"Greeting name: {contact.greeting_name}\n"
@@ -195,8 +179,17 @@ def draft_email(contact: Contact, mode: str) -> str:
         f"Start by researching {contact.company_name} with the "
         f"company_research tool, then draft the email using the PVC framework."
     )
-    result = executor.invoke({"input": human_input})
-    return result["output"]
+ 
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": user_message}]}
+    )
+ 
+    # Get the final AI message from the response
+    messages = result.get("messages", [])
+    for msg in reversed(messages):
+        if hasattr(msg, "content") and msg.content and not getattr(msg, "tool_calls", None):
+            return msg.content
+    return "Error: agent did not produce a response."
  
  
 # ─────────────────────────────────────────────────
@@ -289,7 +282,6 @@ with col1:
 with col2:
     mode = st.selectbox("Email type", ["Outreach", "Follow-Up"])
  
-# Show selected contact info
 with st.expander(f"📋 {selected.company_name}", expanded=False):
     st.markdown(f"**Contact:** {selected.greeting_name}")
     st.markdown(f"**Email:** {selected.email}")
@@ -311,7 +303,6 @@ if st.button(f"✍️ Draft {mode} → {selected.company_name}", type="primary")
         st.warning("Enter your API key in the sidebar.")
         st.stop()
  
-    # User message
     user_msg = (
         f"Draft a **{mode.lower()}** email for "
         f"**{selected.company_name}** (Dear {selected.greeting_name})."
@@ -320,7 +311,6 @@ if st.button(f"✍️ Draft {mode} → {selected.company_name}", type="primary")
     with st.chat_message("user"):
         st.markdown(user_msg)
  
-    # Agent response
     with st.chat_message("assistant"):
         with st.spinner(
             f"Researching {selected.company_name} and drafting {mode.lower()}…"
