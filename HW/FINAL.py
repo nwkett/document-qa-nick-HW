@@ -1,3 +1,4 @@
+
 import io
 import os
 from dataclasses import dataclass
@@ -6,8 +7,13 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_community.tools import DuckDuckGoSearchRun
+ 
+try:
+    from langchain.agents import create_tool_calling_agent, AgentExecutor
+except ImportError:
+    from langchain_core.agents import AgentExecutor
+    from langchain.agents import create_tool_calling_agent
  
 load_dotenv()
  
