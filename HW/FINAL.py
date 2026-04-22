@@ -101,8 +101,12 @@ def get_tools():
  
 OUTREACH_PROMPT = """\
 You are writing a cold outreach email on behalf of Summit Standard, \
-an event rentals company.
- 
+an event rentals company based in Jackson Hole. Summit Standard specializes in event infrastucture such as tents, tables, chairs, flooring and more.
+Our big services include:
+1. 12-hour strike capability
+2. tents, flooring, and more
+3. Single Point of Accountability
+
 FRAMEWORK — PVC (Personalization, Value, Call-to-Action):
  
 1. PERSONALIZATION (opener): Write a specific, non-generic first line that \
@@ -136,6 +140,11 @@ Subject: <subject line>
 FOLLOWUP_PROMPT = """\
 You are writing a follow-up email on behalf of Summit Standard, \
 an event rentals company. The recipient did not respond to a prior outreach.
+Summit Standard specializes in event infrastucture such as tents, tables, chairs, flooring and more.
+Our big services include:
+1. 12-hour strike capability
+2. tents, flooring, and more
+3. Single Point of Accountability
  
 FRAMEWORK — PVC (Personalization, Value, Call-to-Action):
  
