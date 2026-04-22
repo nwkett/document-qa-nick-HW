@@ -8,12 +8,8 @@ import streamlit as st
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.tools import DuckDuckGoSearchRun
- 
-try:
-    from langchain.agents import create_tool_calling_agent, AgentExecutor
-except ImportError:
-    from langchain_core.agents import AgentExecutor
-    from langchain.agents import create_tool_calling_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+
  
 load_dotenv()
  
