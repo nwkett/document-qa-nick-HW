@@ -1,4 +1,3 @@
-
 import io
 import os
 from dataclasses import dataclass
@@ -8,8 +7,6 @@ import streamlit as st
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
-from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_community.tools import DuckDuckGoSearchResults
  
 load_dotenv()
  
@@ -31,12 +28,34 @@ class Contact:
  
 def parse_contacts(csv_text: str) -> list[Contact]:
     df = pd.read_csv(io.StringIO(csv_text))
-    df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
+ 
+    # Normalize: strip, lowercase, collapse any non-alphanumeric to underscore
+    import re
+    df.columns = [
+        re.sub(r'[^a-z0-9]+', '_', col.strip().lower()).strip('_')
+        for col in df.columns
+    ]
+ 
+    # Map common variations to expected names
+    rename = {}
+    for col in df.columns:
+        if col in ("company_name", "company", "companyname", "company_nm"):
+            rename[col] = "company_name"
+        elif col in ("primary_contact", "contact", "contact_name", "name", "primarycontact"):
+            rename[col] = "primary_contact"
+        elif col in ("email", "email_address", "e_mail"):
+            rename[col] = "email"
+        elif col in ("description", "desc", "company_description", "about", "notes"):
+            rename[col] = "description"
+    df = df.rename(columns=rename)
  
     required = {"company_name", "primary_contact", "email", "description"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(f"CSV missing columns: {sorted(missing)}")
+        raise ValueError(
+            f"CSV missing columns: {sorted(missing)}. "
+            f"Found: {list(df.columns)}"
+        )
  
     return [
         Contact(
@@ -54,19 +73,26 @@ def parse_contacts(csv_text: str) -> list[Contact]:
 # Tools
 # ─────────────────────────────────────────────────
  
-ddg_search = DuckDuckGoSearchRun(
-    name="company_research",
-    description=(
-        "Search the web for recent news, social media posts, blog articles, "
-        "or any public info about a company. Use this to find a specific, "
-        "personalized opener for the email — a recent event they hosted, "
-        "an Instagram post, a blog, a news mention, or a milestone. "
-        "Pass the company name plus keywords like 'recent event', 'news', "
-        "'Instagram', or 'blog'."
-    ),
-)
- 
-TOOLS = [ddg_search]
+def get_tools():
+    """Build the tool list. DuckDuckGo is initialized here (not at
+    module level) so a missing duckduckgo-search package doesn't
+    crash the entire app on import."""
+    try:
+        from langchain_community.tools import DuckDuckGoSearchRun
+        ddg_search = DuckDuckGoSearchRun(
+            name="company_research",
+            description=(
+                "Search the web for recent news, social media posts, blog articles, "
+                "or any public info about a company. Use this to find a specific, "
+                "personalized opener for the email — a recent event they hosted, "
+                "an Instagram post, a blog, a news mention, or a milestone. "
+                "Pass the company name plus keywords like 'recent event', 'news', "
+                "'Instagram', or 'blog'."
+            ),
+        )
+        return [ddg_search]
+    except (ImportError, Exception):
+        return []
  
  
 # ─────────────────────────────────────────────────
@@ -167,7 +193,7 @@ def draft_email(contact: Contact, mode: str) -> str:
  
     agent = create_agent(
         model,
-        tools=TOOLS,
+        tools=get_tools(),
         system_prompt=system_prompt,
     )
  
