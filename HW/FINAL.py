@@ -5,14 +5,13 @@ import chromadb
 import pandas as pd
 import streamlit as st
 from langchain.agents import create_agent
-from langchain_community.memory import ConversationBufferMemory
 from langchain_openai import ChatOpenAI
 from langchain_community.tools import DuckDuckGoSearchRun
 
 
-# 
-# Upload CSV
-# 
+# ─────────────────────────────────────────────────
+# Contacts
+# ─────────────────────────────────────────────────
 
 def parse_contacts(csv_text: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(csv_text))
@@ -33,9 +32,9 @@ def greeting_name(row) -> str:
     return name if name.strip() else "Team"
 
 
-
-# ChromaDB
-
+# ─────────────────────────────────────────────────
+# Email memory (ChromaDB)
+# ─────────────────────────────────────────────────
 
 client = chromadb.PersistentClient(path="./email_memory")
 collection = client.get_or_create_collection("sent_emails")
@@ -104,9 +103,9 @@ def format_past_emails(emails: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-
+# ─────────────────────────────────────────────────
 # Tools
-
+# ─────────────────────────────────────────────────
 
 def get_tools():
     ddg_search = DuckDuckGoSearchRun(
@@ -123,9 +122,9 @@ def get_tools():
     return [ddg_search]
 
 
-
-# System prompts PVC framework
-
+# ─────────────────────────────────────────────────
+# System prompts — PVC framework
+# ─────────────────────────────────────────────────
 
 OUTREACH_PROMPT = """\
 You are writing a cold outreach email on behalf of Summit Standard, \
@@ -223,7 +222,10 @@ EMAIL TO EVALUATE:
 {draft}
 """
 
+
+# ─────────────────────────────────────────────────
 # LLM + Agent
+# ─────────────────────────────────────────────────
 
 def get_model():
     provider = st.session_state.get("provider", "OpenAI")
@@ -257,14 +259,12 @@ def draft_email(row, mode: str) -> tuple[str, str]:
     greeting = greeting_name(row)
     company = row["Company_Name"]
 
+    # Initialize conversation buffer memory
     if "conversation_memory" not in st.session_state:
         st.session_state["conversation_memory"] = {}
 
     if company not in st.session_state["conversation_memory"]:
-        st.session_state["conversation_memory"][company] = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-        )
+        st.session_state["conversation_memory"][company] = []
 
     memory = st.session_state["conversation_memory"][company]
 
@@ -274,14 +274,13 @@ def draft_email(row, mode: str) -> tuple[str, str]:
         system_prompt=system_prompt,
     )
 
+    # Retrieve and rerank past emails
     past_emails = get_past_emails(company)
     reranked_emails = rerank_emails(past_emails, mode)
     history_text = format_past_emails(reranked_emails)
 
-    buffer_history = memory.load_memory_variables({}).get("chat_history", [])
-    buffer_text = "\n".join(
-        [f"{m.type.upper()}: {m.content}" for m in buffer_history]
-    ) if buffer_history else "No prior conversation."
+    # Load conversation history from buffer
+    buffer_text = "\n".join(memory) if memory else "No prior conversation."
 
     user_message = (
         f"Draft an email for this contact.\n\n"
@@ -308,18 +307,21 @@ def draft_email(row, mode: str) -> tuple[str, str]:
             draft = msg.content
             break
 
-    memory.save_context({"input": user_message}, {"output": draft})
+    # Save exchange to conversation buffer
+    memory.append(f"USER: {user_message}\nASSISTANT: {draft}")
 
+    # Run ethics check
     ethics_result = run_ethics_check(draft, model)
 
+    # Save the draft to long-term memory
     save_email(company, mode, draft)
 
     return draft, ethics_result
 
 
-
+# ─────────────────────────────────────────────────
 # Streamlit UI
-
+# ─────────────────────────────────────────────────
 
 st.set_page_config(page_title="EventReach", layout="centered")
 
@@ -367,7 +369,7 @@ if not uploaded:
     st.stop()
 
 try:
-    df = parse_contacts(uploaded.getvalue().decode("utf-8"))
+    df = parse_contacts(uploaded.getvalue().decode("utf-8-sig"))
 except Exception as e:
     st.error(f"CSV error: {e}")
     st.stop()
