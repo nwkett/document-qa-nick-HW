@@ -9,9 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain_community.tools import DuckDuckGoSearchRun
 
 
-# ─────────────────────────────────────────────────
-# Contacts
-# ─────────────────────────────────────────────────
+# Upload Contacts
 
 def parse_contacts(csv_text: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(csv_text))
@@ -32,9 +30,7 @@ def greeting_name(row) -> str:
     return name if name.strip() else "Team"
 
 
-# ─────────────────────────────────────────────────
-# Email memory (ChromaDB)
-# ─────────────────────────────────────────────────
+# ChromaDB
 
 client = chromadb.PersistentClient(path="./email_memory")
 collection = client.get_or_create_collection("sent_emails")
@@ -103,9 +99,9 @@ def format_past_emails(emails: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-# ─────────────────────────────────────────────────
+
 # Tools
-# ─────────────────────────────────────────────────
+
 
 def get_tools():
     ddg_search = DuckDuckGoSearchRun(
@@ -122,9 +118,7 @@ def get_tools():
     return [ddg_search]
 
 
-# ─────────────────────────────────────────────────
 # System prompts — PVC framework
-# ─────────────────────────────────────────────────
 
 OUTREACH_PROMPT = """\
 You are writing a cold outreach email on behalf of Summit Standard, \
@@ -223,9 +217,7 @@ EMAIL TO EVALUATE:
 """
 
 
-# ─────────────────────────────────────────────────
 # LLM + Agent
-# ─────────────────────────────────────────────────
 
 def get_model():
     provider = st.session_state.get("provider", "OpenAI")
@@ -319,9 +311,7 @@ def draft_email(row, mode: str) -> tuple[str, str]:
     return draft, ethics_result
 
 
-# ─────────────────────────────────────────────────
 # Streamlit UI
-# ─────────────────────────────────────────────────
 
 st.set_page_config(page_title="EventReach", layout="centered")
 
