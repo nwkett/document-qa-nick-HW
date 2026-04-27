@@ -1,72 +1,95 @@
 import io
-import os
-from dataclasses import dataclass
+from datetime import datetime
  
+import chromadb
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
+from langchain_community.tools import DuckDuckGoSearchRun
  
-load_dotenv()
  
 # ─────────────────────────────────────────────────
 # Contacts
 # ─────────────────────────────────────────────────
  
-@dataclass
-class Contact:
-    company_name: str
-    primary_contact: str
-    email: str
-    description: str
- 
-    @property
-    def greeting_name(self) -> str:
-        return self.primary_contact if self.primary_contact.strip() else "Team"
- 
- 
-def parse_contacts(csv_text: str) -> list[Contact]:
+def parse_contacts(csv_text: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(csv_text))
+    df.columns = df.columns.str.strip()
  
-    # Normalize: strip, lowercase, collapse any non-alphanumeric to underscore
-    import re
-    df.columns = [
-        re.sub(r'[^a-z0-9]+', '_', col.strip().lower()).strip('_')
-        for col in df.columns
-    ]
- 
-    # Map common variations to expected names
-    rename = {}
-    for col in df.columns:
-        if col in ("company_name", "company", "companyname", "company_nm"):
-            rename[col] = "company_name"
-        elif col in ("primary_contact", "contact", "contact_name", "name", "primarycontact"):
-            rename[col] = "primary_contact"
-        elif col in ("email", "email_address", "e_mail"):
-            rename[col] = "email"
-        elif col in ("description", "desc", "company_description", "about", "notes"):
-            rename[col] = "description"
-    df = df.rename(columns=rename)
- 
-    required = {"company_name", "primary_contact", "email", "description"}
+    required = {"Company_Name", "Primary_Contact", "Email", "Description"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(
-            f"CSV missing columns: {sorted(missing)}. "
-            f"Found: {list(df.columns)}"
-        )
+        raise ValueError(f"CSV missing columns: {sorted(missing)}")
  
-    return [
-        Contact(
-            company_name=str(r["company_name"]).strip(),
-            primary_contact=str(r["primary_contact"]).strip()
-                if pd.notna(r["primary_contact"]) else "",
-            email=str(r["email"]).strip(),
-            description=str(r["description"]).strip(),
+    df["Primary_Contact"] = df["Primary_Contact"].fillna("").astype(str).str.strip()
+ 
+    return df
+ 
+ 
+def greeting_name(row) -> str:
+    name = row["Primary_Contact"]
+    return name if name.strip() else "Team"
+ 
+ 
+# ─────────────────────────────────────────────────
+# Email memory (ChromaDB)
+# ─────────────────────────────────────────────────
+ 
+client = chromadb.PersistentClient(path="./email_memory")
+collection = client.get_or_create_collection("sent_emails")
+ 
+ 
+def save_email(company_name: str, email_type: str, draft: str):
+    """Save a drafted email to ChromaDB for future reference."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    doc_id = f"{company_name}_{email_type}_{timestamp}".replace(" ", "_")
+ 
+    collection.add(
+        documents=[draft],
+        metadatas=[{
+            "company": company_name,
+            "type": email_type,
+            "date": timestamp,
+        }],
+        ids=[doc_id],
+    )
+ 
+ 
+def get_past_emails(company_name: str) -> list[dict]:
+    """Retrieve all past emails sent to a company, sorted by date."""
+    results = collection.get(
+        where={"company": company_name},
+        include=["documents", "metadatas"],
+    )
+ 
+    if not results["documents"]:
+        return []
+ 
+    emails = []
+    for doc, meta in zip(results["documents"], results["metadatas"]):
+        emails.append({
+            "date": meta["date"],
+            "type": meta["type"],
+            "content": doc,
+        })
+ 
+    emails.sort(key=lambda x: x["date"])
+    return emails
+ 
+ 
+def format_past_emails(emails: list[dict]) -> str:
+    """Format past emails into a string for the prompt."""
+    if not emails:
+        return "No previous emails have been sent to this company."
+ 
+    parts = []
+    for i, email in enumerate(emails, 1):
+        parts.append(
+            f"--- Email {i} ({email['type']}, sent {email['date']}) ---\n"
+            f"{email['content']}"
         )
-        for _, r in df.iterrows()
-    ]
+    return "\n\n".join(parts)
  
  
 # ─────────────────────────────────────────────────
@@ -74,25 +97,18 @@ def parse_contacts(csv_text: str) -> list[Contact]:
 # ─────────────────────────────────────────────────
  
 def get_tools():
-    """Build the tool list. DuckDuckGo is initialized here (not at
-    module level) so a missing duckduckgo-search package doesn't
-    crash the entire app on import."""
-    try:
-        from langchain_community.tools import DuckDuckGoSearchRun
-        ddg_search = DuckDuckGoSearchRun(
-            name="company_research",
-            description=(
-                "Search the web for recent news, social media posts, blog articles, "
-                "or any public info about a company. Use this to find a specific, "
-                "personalized opener for the email — a recent event they hosted, "
-                "an Instagram post, a blog, a news mention, or a milestone. "
-                "Pass the company name plus keywords like 'recent event', 'news', "
-                "'Instagram', or 'blog'."
-            ),
-        )
-        return [ddg_search]
-    except (ImportError, Exception):
-        return []
+    ddg_search = DuckDuckGoSearchRun(
+        name="company_research",
+        description=(
+            "Search the web for recent news, social media posts, blog articles, "
+            "or any public info about a company. Use this to find a specific, "
+            "personalized opener for the email — a recent event they hosted, "
+            "an Instagram post, a blog, a news mention, or a milestone. "
+            "Pass the company name plus keywords like 'recent event', 'news', "
+            "'Instagram', or 'blog'."
+        ),
+    )
+    return [ddg_search]
  
  
 # ─────────────────────────────────────────────────
@@ -101,12 +117,8 @@ def get_tools():
  
 OUTREACH_PROMPT = """\
 You are writing a cold outreach email on behalf of Summit Standard, \
-an event rentals company based in Jackson Hole. Summit Standard specializes in event infrastucture such as tents, tables, chairs, flooring and more.
-Our big services include:
-1. 12-hour strike capability
-2. tents, flooring, and more
-3. Single Point of Accountability
-
+an event rentals company.
+ 
 FRAMEWORK — PVC (Personalization, Value, Call-to-Action):
  
 1. PERSONALIZATION (opener): Write a specific, non-generic first line that \
@@ -140,21 +152,22 @@ Subject: <subject line>
 FOLLOWUP_PROMPT = """\
 You are writing a follow-up email on behalf of Summit Standard, \
 an event rentals company. The recipient did not respond to a prior outreach.
-Summit Standard specializes in event infrastucture such as tents, tables, chairs, flooring and more.
-Our big services include:
-1. 12-hour strike capability
-2. tents, flooring, and more
-3. Single Point of Accountability
+ 
+You have access to the PREVIOUS EMAILS we sent to this company. Use them \
+to write a follow-up that builds on what was already said — reference the \
+specific subject, value prop, or CTA from the last email. Do NOT repeat \
+the same pitch. Each follow-up should add something new.
  
 FRAMEWORK — PVC (Personalization, Value, Call-to-Action):
  
-1. PERSONALIZATION: Reference the previous email briefly ("I reached out \
-recently about supporting your upcoming events…") then add ONE new specific \
-detail you found via the company_research tool — a recent post, event, hire, \
-or news item. Show you are still paying attention to their world.
+1. PERSONALIZATION: Reference what you said in the last email specifically \
+(the actual subject line or opener, not a vague "I reached out recently"). \
+Then add ONE new detail from the company_research tool — a recent post, \
+event, hire, or news item.
  
-2. VALUE (one sentence): "We help event teams like yours deliver seamless \
-experiences with premium rentals and hands-on support."
+2. VALUE (one sentence): Restate briefly but differently from the last email. \
+"We help event teams like yours deliver seamless experiences with premium \
+rentals and hands-on support."
  
 3. CALL-TO-ACTION: "Would a 15-minute call this week or next work for you?"
  
@@ -163,8 +176,11 @@ RULES:
 - UNDER 75 WORDS. This is a nudge, not a re-pitch.
 - Confident, not apologetic. Never write "just checking in", "sorry to \
 bother", "bumping this", or "circling back".
+- Do NOT repeat the same opener, value statement, or CTA verbatim from \
+any previous email. Vary your approach each time.
 - Sign off: [Your Name], Summit Standard
-- PROCESS: Call company_research to find something fresh to reference.
+- PROCESS: Read the previous emails carefully, then call company_research \
+to find something fresh, then draft.
 - Output ONLY the final email:
  
 Subject: <subject line>
@@ -185,20 +201,22 @@ def get_model():
         return ChatOpenAI(
             model=st.session_state.get("model", "gpt-4o-mini"),
             temperature=0.6,
-            api_key=api_key or os.getenv("OPENAI_API_KEY"),
+            api_key=api_key or st.secrets.get("OPENAI_API_KEY", ""),
         )
     else:
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(
             model=st.session_state.get("model", "claude-sonnet-4-20250514"),
             temperature=0.6,
-            api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
+            api_key=api_key or st.secrets.get("ANTHROPIC_API_KEY", ""),
         )
  
  
-def draft_email(contact: Contact, mode: str) -> str:
+def draft_email(row, mode: str) -> str:
     system_prompt = FOLLOWUP_PROMPT if mode == "Follow-Up" else OUTREACH_PROMPT
     model = get_model()
+    greeting = greeting_name(row)
+    company = row["Company_Name"]
  
     agent = create_agent(
         model,
@@ -206,13 +224,19 @@ def draft_email(contact: Contact, mode: str) -> str:
         system_prompt=system_prompt,
     )
  
+    # Retrieve past emails for this company
+    past_emails = get_past_emails(company)
+    history_text = format_past_emails(past_emails)
+ 
     user_message = (
         f"Draft an email for this contact.\n\n"
-        f"Company name: {contact.company_name}\n"
-        f"Greeting name: {contact.greeting_name}\n"
-        f"Email: {contact.email}\n"
-        f"Company description: {contact.description}\n\n"
-        f"Start by researching {contact.company_name} with the "
+        f"Company name: {company}\n"
+        f"Greeting name: {greeting}\n"
+        f"Email: {row['Email']}\n"
+        f"Company description: {row['Description']}\n\n"
+        f"PREVIOUS EMAILS SENT TO THIS COMPANY:\n"
+        f"{history_text}\n\n"
+        f"Start by researching {company} with the "
         f"company_research tool, then draft the email using the PVC framework."
     )
  
@@ -220,35 +244,28 @@ def draft_email(contact: Contact, mode: str) -> str:
         {"messages": [{"role": "user", "content": user_message}]}
     )
  
-    # Get the final AI message from the response
     messages = result.get("messages", [])
+    draft = "Error: agent did not produce a response."
     for msg in reversed(messages):
         if hasattr(msg, "content") and msg.content and not getattr(msg, "tool_calls", None):
-            return msg.content
-    return "Error: agent did not produce a response."
+            draft = msg.content
+            break
+ 
+    # Save the draft to memory
+    save_email(company, mode, draft)
+ 
+    return draft
  
  
 # ─────────────────────────────────────────────────
 # Streamlit UI
 # ─────────────────────────────────────────────────
  
-st.set_page_config(
-    page_title="EventReach — Summit Standard",
-    page_icon="🏔️",
-    layout="centered",
-)
+st.set_page_config(page_title="EventReach", layout="centered")
  
-st.markdown("""
-<style>
-.block-container { max-width: 720px; }
-div[data-testid="stChatMessage"] { font-size: 0.92rem; }
-</style>
-""", unsafe_allow_html=True)
+st.title("EventReach")
  
-st.title("🏔️ EventReach")
-st.caption("Summit Standard — personalized outreach powered by AI research.")
- 
-# ── Sidebar ──────────────────────────────────────
+# Sidebar
  
 with st.sidebar:
     st.header("Settings")
@@ -259,7 +276,7 @@ with st.sidebar:
     if provider == "OpenAI":
         st.session_state["api_key"] = st.text_input(
             "API key", type="password", placeholder="sk-...",
-            value=os.getenv("OPENAI_API_KEY", ""),
+            value=st.secrets.get("OPENAI_API_KEY", ""),
         )
         st.session_state["model"] = st.selectbox(
             "Model", ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
@@ -267,63 +284,54 @@ with st.sidebar:
     else:
         st.session_state["api_key"] = st.text_input(
             "API key", type="password", placeholder="sk-ant-...",
-            value=os.getenv("ANTHROPIC_API_KEY", ""),
+            value=st.secrets.get("ANTHROPIC_API_KEY", ""),
         )
         st.session_state["model"] = st.selectbox(
             "Model", ["claude-sonnet-4-20250514", "claude-haiku-4-20250414"],
         )
  
-    st.divider()
-    st.markdown(
-        "**How it works**\n\n"
-        "1. Upload your contacts CSV\n"
-        "2. Pick a contact from the dropdown\n"
-        "3. Choose Outreach or Follow-Up\n"
-        "4. The agent searches DuckDuckGo for their company, "
-        "then drafts a PVC email using what it finds"
-    )
- 
-# ── CSV upload ───────────────────────────────────
+# CSV upload
  
 uploaded = st.file_uploader("Upload contacts CSV", type=["csv"])
  
 if not uploaded:
     st.info(
         "Upload a CSV with columns: "
-        "**Company_Name**, **Primary_Contact**, **Email**, **Description**"
+        "Company_Name, Primary_Contact, Email, Description"
     )
     st.stop()
  
 try:
-    contacts = parse_contacts(uploaded.getvalue().decode("utf-8"))
+    df = parse_contacts(uploaded.getvalue().decode("utf-8"))
 except Exception as e:
     st.error(f"CSV error: {e}")
     st.stop()
  
-# ── Contact picker + mode ────────────────────────
+# Contact picker + mode
  
 col1, col2 = st.columns([3, 2])
  
 with col1:
-    contact_map = {}
-    display_names = []
-    for c in contacts:
-        label = f"{c.company_name} — {c.greeting_name}"
-        contact_map[label] = c
-        display_names.append(label)
- 
-    selected_label = st.selectbox("Contact", display_names)
-    selected = contact_map[selected_label]
+    labels = [
+        f"{row['Company_Name']} — {greeting_name(row)}"
+        for _, row in df.iterrows()
+    ]
+    selected_label = st.selectbox("Contact", labels)
+    selected_idx = labels.index(selected_label)
+    selected_row = df.iloc[selected_idx]
  
 with col2:
     mode = st.selectbox("Email type", ["Outreach", "Follow-Up"])
  
-with st.expander(f"📋 {selected.company_name}", expanded=False):
-    st.markdown(f"**Contact:** {selected.greeting_name}")
-    st.markdown(f"**Email:** {selected.email}")
-    st.markdown(f"**About:** {selected.description}")
+# Show email history for selected company
  
-# ── Chat history ─────────────────────────────────
+past = get_past_emails(selected_row["Company_Name"])
+if past:
+    st.write(f"Email history ({len(past)} sent)")
+    for email in past:
+        st.text(f"[{email['type']}] {email['date']}")
+ 
+# Chat history
  
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
@@ -332,29 +340,27 @@ for msg in st.session_state["messages"]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
  
-# ── Draft button ─────────────────────────────────
+# Draft button
  
-if st.button(f"✍️ Draft {mode} → {selected.company_name}", type="primary"):
+if st.button(f"Draft {mode} for {selected_row['Company_Name']}"):
     if not st.session_state.get("api_key"):
         st.warning("Enter your API key in the sidebar.")
         st.stop()
  
+    greeting = greeting_name(selected_row)
     user_msg = (
-        f"Draft a **{mode.lower()}** email for "
-        f"**{selected.company_name}** (Dear {selected.greeting_name})."
+        f"Draft a {mode.lower()} email for "
+        f"{selected_row['Company_Name']} (Dear {greeting})."
     )
     st.session_state["messages"].append({"role": "user", "content": user_msg})
     with st.chat_message("user"):
         st.markdown(user_msg)
  
     with st.chat_message("assistant"):
-        with st.spinner(
-            f"Researching {selected.company_name} and drafting {mode.lower()}…"
-        ):
-            try:
-                draft = draft_email(selected, mode)
-            except Exception as e:
-                draft = f"⚠️ Error: {e}"
+        try:
+            draft = draft_email(selected_row, mode)
+        except Exception as e:
+            draft = f"Error: {e}"
         st.markdown(draft)
  
     st.session_state["messages"].append({"role": "assistant", "content": draft})
